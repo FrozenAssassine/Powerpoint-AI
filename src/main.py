@@ -2,8 +2,12 @@ import collections.abc
 from pptx import Presentation
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Pt
-import helper
+import powerpoint_helper
 import ai
+import data_cleaner
+import image_helper
+import os
+from pathlib import Path
 
 #Preferences:
 topic = "TOPIC"
@@ -11,35 +15,44 @@ author = "AUTHOR"
 language = "LANGUAGE" #example english, german
 api_key = "API-KEY" #https://platform.openai.com/account/api-keys
 
-#create the presentation:
-prs = Presentation()
+#create the presentation from a template to get the correct format (16/9):
+prs = Presentation("src/pptx-default-16x9.pptx")
 
-#title slide:
-title_slide = helper.add_slide(prs, 0)
-helper.change_title(title_slide, topic, textlayout=helper.Textlayout(68, "Dubai", PP_ALIGN.CENTER))
-title_slide.placeholders[1].text = f"By {author}"
+#get some images:
+current_image_index = 0
+image_helper.get_image_topic(topic)
+image_list = os.listdir(f"images/{topic}")
+print(image_list)
+#splashscreen
+powerpoint_helper.add_text_slide(prs, topic, f"By {author}")
 
 #content slides:
-raw_data = ai.getInfomation(topic, language, api_key)
-print(raw_data)
-print("Got data")
+sub_topics = ai.getTopics(topic, language, api_key)
+print("\n".join(sub_topics))
 
-lines = raw_data.strip().split("\n")
-data = ""
-headline = ""
+#table of content:
+powerpoint_helper.add_text_slide(prs, "Table of content",  data_cleaner.clean_bullet_points("\n".join(sub_topics)))
 
-for line in lines:
-	if "-" not in line and ":" in line or ("." in line and any(chr.isdigit() for chr in line)):
-		#add a slide for each topic:
-		slide = helper.add_slide(prs, 1)
-		helper.change_title(slide, headline, textlayout=helper.Textlayout(48, "Dubai", PP_ALIGN.LEFT))
-		slide.placeholders[1].text = data.strip()
-		slide.placeholders[1].text_frame.paragraphs[0].font.size = Pt(32)
-		data = ""
+#loop through the sub topics and create a slide for every topic
+count = 0
+for sub_topic in sub_topics:
+    count = count + 1
+    print(f"Slide {count}/{len(sub_topics)}")
+    data = ai.getTopicInformations(sub_topic, topic, language, api_key)
 
-		headline = line.replace(":", "")
-		continue
+    if count % 2 == 1 and current_image_index < len(image_list): #every two slides:
+        powerpoint_helper.add_text_slide_with_background(prs, sub_topic, data_cleaner.clean_bullet_points(data), f"images/{topic}/{image_list[current_image_index]}")
+        current_image_index = current_image_index + 1
+    else:
+        powerpoint_helper.add_text_slide(prs, sub_topic, data_cleaner.clean_bullet_points(data))
 
-	data = data + line + "\n"
 
+
+#sources and end:
+powerpoint_helper.add_splash_slide(prs, "Thanks for listening!", "")
+powerpoint_helper.add_text_slide(prs, "Sources", "")
+
+[f.unlink() for f in Path(f"images/{topic}/").glob("*") if f.is_file()] 
+
+print("DONE")
 prs.save(f"{topic}.pptx")
